@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 
+from textual.widgets import TabbedContent
+
 from swarm.engine import events as E
 from swarm.engine.events import Event
 from swarm.ui.engine_app import EngineApp
@@ -38,5 +40,11 @@ def test_engine_app_mounts_and_renders_events():
             await pilot.pause()
             assert app.state["chunk-0001"] == "passed"          # healed
             assert "chunk-0001" not in app._failed
+
+            # selecting a chunk opens the Chunk tab
+            app.outputs = {"chunk-0000": ("the original", "the rewritten")}
+            app.select_chunk("chunk-0000")
+            await pilot.pause()
+            assert app.query_one("#tabs", TabbedContent).active == "chunk"
 
     asyncio.run(scenario())

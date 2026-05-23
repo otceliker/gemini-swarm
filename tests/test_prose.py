@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import zipfile
 
+import pytest
+
 from swarm.engine.state import ExecutionPlan
-from swarm.modalities.prose import ProseModality, chunk_text, epub_to_text
+from swarm.modalities.prose import ProseModality, _fetch, chunk_text, epub_to_text
 
 
 class ProseFake:
@@ -35,6 +37,30 @@ def test_max_segments_caps_chunks():
     m = ProseModality(reasoner=ProseFake(), max_chars=10, max_segments=2)
     segs = m.ingest("aaaa\n\nbbbb\n\ncccc\n\ndddd")
     assert len(segs) == 2
+
+
+def test_epub_to_text_rejects_non_zip_with_clear_error(tmp_path):
+    bad = tmp_path / "fake.epub"
+    bad.write_text("definitely not a zip archive")
+    with pytest.raises(ValueError, match="not a valid EPUB"):
+        epub_to_text(str(bad))
+
+
+def test_epub_to_text_reads_directory_package(tmp_path):
+    pkg = tmp_path / "book.epub"          # an unzipped epub "package" (a directory)
+    (pkg / "OEBPS").mkdir(parents=True)
+    (pkg / "OEBPS" / "x-0.xhtml").write_text("<html><body><p>Chapter one.</p></body></html>")
+    (pkg / "OEBPS" / "x-1.xhtml").write_text("<html><body><p>Chapter two.</p></body></html>")
+    text = epub_to_text(str(pkg))
+    assert "Chapter one." in text and "Chapter two." in text
+    assert text.index("one") < text.index("two")
+
+
+def test_fetch_handles_quoted_epub_path(tmp_path):
+    p = tmp_path / "book.epub"
+    with zipfile.ZipFile(p, "w") as z:
+        z.writestr("OEBPS/x-0.xhtml", "<html><body><p>Hello world.</p></body></html>")
+    assert "Hello world." in _fetch(f'"{p}"')   # drag-and-drop quoting tolerated
 
 
 def test_epub_to_text_extracts_in_order_and_strips_scripts(tmp_path):

@@ -84,6 +84,7 @@ class EngineApp(App):
         self.chunkview = self.query_one("#chunkview", RichLog)
         self.finalview = self.query_one("#finalview", RichLog)
         self.bible.write("[b]CANON / DECISIONS[/]")
+        self.chunkview.write("[dim]Select a chunk in the roster (Run tab) to see its before/after here.[/]")
         self.channel.write("[b]🐝 universal editor[/] — confirm or edit the source, then press Enter.")
         self.query_one("#prompt", Input).focus()
 
@@ -104,20 +105,26 @@ class EngineApp(App):
         self.chunkview.clear()
         self.chunkview.write(f"[b]{self._nm(sid)}[/]  [dim]{sid}[/]\n")
         before, after = self.outputs.get(sid, ("", ""))
+        if not before and not after:
+            self.chunkview.write("[dim](this chunk's output isn't ready yet — "
+                                 "it appears once the run finishes)[/]")
+            return
         if before:
             self.chunkview.write("[b]ORIGINAL[/]")
             self.chunkview.write(before)
         if after:
             self.chunkview.write("\n[b green]REWRITTEN[/]")
             self.chunkview.write(after)
-        elif not before:
-            self.chunkview.write("[dim](no output yet — the run is still in progress)[/]")
 
     # ---- clickable roster ----
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        if event.option.id:
-            self._show_chunk(event.option.id)
-            self.query_one("#tabs", TabbedContent).active = "chunk"
+        sid = getattr(event, "option_id", None) or getattr(event.option, "id", None)
+        if sid:
+            self.select_chunk(sid)
+
+    def select_chunk(self, sid: str) -> None:
+        self._show_chunk(sid)
+        self.query_one("#tabs", TabbedContent).active = "chunk"
 
     # ---- event consumer (UI thread) ----
     def _on_event(self, ev: Event) -> None:

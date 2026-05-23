@@ -106,31 +106,63 @@ def _doc_order_key(name: str) -> int:
     return int(nums[-1]) if nums else 0
 
 
+def _html_to_text(raw: str) -> str:
+    parser = _HTMLText()
+    parser.feed(raw)
+    return parser.get_text()
+
+
+def _epub_dir_to_text(path: str) -> str:
+    """Some EPUBs (esp. on macOS) are unzipped directory packages, not zip files."""
+    docs = []
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            if name.lower().endswith((".xhtml", ".html", ".htm")):
+                docs.append(os.path.join(root, name))
+    docs.sort(key=lambda p: _doc_order_key(os.path.basename(p)))
+    parts = []
+    for doc in docs:
+        with open(doc, encoding="utf-8", errors="replace") as fh:
+            text = _html_to_text(fh.read())
+        if text:
+            parts.append(text)
+    return "\n\n".join(parts)
+
+
 def epub_to_text(path: str) -> str:
-    """Extract plain text from an EPUB (zip of XHTML), in document order."""
-    with zipfile.ZipFile(path) as z:
+    """Extract plain text from an EPUB (zip of XHTML, or a directory package)."""
+    if os.path.isdir(path):
+        return _epub_dir_to_text(path)
+    try:
+        zf = zipfile.ZipFile(path)
+    except zipfile.BadZipFile as exc:
+        raise ValueError(
+            f"'{path}' is not a valid EPUB — it could not be opened as a zip archive. "
+            "EPUBs are zip files; the download may be incomplete or a different format "
+            "(try re-downloading, or pass a .txt file)."
+        ) from exc
+    with zf as z:
         docs = sorted(
             (n for n in z.namelist() if n.lower().endswith((".xhtml", ".html", ".htm"))),
             key=_doc_order_key,
         )
-        parts = []
-        for name in docs:
-            parser = _HTMLText()
-            parser.feed(z.read(name).decode("utf-8", "replace"))
-            text = parser.get_text()
-            if text:
-                parts.append(text)
+        parts = [t for n in docs if (t := _html_to_text(z.read(n).decode("utf-8", "replace")))]
     return "\n\n".join(parts)
 
 
 def _fetch(source: str) -> str:
-    if source.lower().endswith(".epub") and os.path.exists(source):
-        return epub_to_text(source)
-    if source.startswith(("http://", "https://")):
-        with urllib.request.urlopen(source) as resp:  # noqa: S310 (user-supplied URL is intended)
+    # Tolerate drag-and-drop quoting and ~ in typed paths.
+    src = source.strip().strip('"').strip("'")
+    if src.startswith(("http://", "https://")):
+        with urllib.request.urlopen(src) as resp:  # noqa: S310 (user-supplied URL is intended)
             return resp.read().decode("utf-8", "replace")
-    if os.path.exists(source):
-        with open(source, encoding="utf-8", errors="replace") as fh:
+    expanded = os.path.expanduser(src)
+    if expanded.lower().endswith(".epub"):
+        if not os.path.exists(expanded):
+            raise FileNotFoundError(f"EPUB not found: {expanded}")
+        return epub_to_text(expanded)
+    if os.path.exists(expanded):
+        with open(expanded, encoding="utf-8", errors="replace") as fh:
             return fh.read()
     return source  # treat as raw text (handy for tests)
 
