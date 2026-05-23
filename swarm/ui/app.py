@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from rich.markdown import Markdown
+
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal
@@ -64,6 +66,11 @@ class SwarmApp(App):
     # ---- UI helpers (main thread only) ----
     def say(self, msg: str) -> None:
         self.convo.write(msg)
+
+    def show_reply(self, reply: str) -> None:
+        """Render an agent reply as Markdown (bold/lists/code), not raw asterisks."""
+        self.convo.write("[b]🏛  Architect ▸[/]")
+        self.convo.write(Markdown(reply))
 
     def render_roster(self) -> None:
         lines = ["[b]🏛  Architect[/b]", ""]
@@ -161,7 +168,7 @@ class SwarmApp(App):
             reply = f"[error] {exc}"
         self.chat_history.append(f"User: {message}")
         self.chat_history.append(f"Architect: {reply}")
-        self.call_from_thread(self.say, f"[b]🏛  Architect ▸[/] {reply}")
+        self.call_from_thread(self.show_reply, reply)
 
 
 def main() -> None:
