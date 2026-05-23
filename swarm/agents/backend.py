@@ -132,7 +132,8 @@ class GeminiReasoner:
         resp = self.client.models.generate_content(
             model=self.model,
             contents=prompt,
-            config=types.GenerateContentConfig(system_instruction=system_instruction),
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction, temperature=0.0),
         )
         return resp.text or ""
 
