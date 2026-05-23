@@ -17,11 +17,14 @@ from .events import EventBus
 from .state import ExecutionPlan, Message, Pairing, Segment, SharedMedium
 
 WORKER_SYSTEM = (
-    "You are the worker agent responsible for segment '{id}' in a coordinated multi-agent "
-    "{kind} edit. Each round you read the shared discussion and contribute ONLY what is needed "
-    "to keep the overall edit consistent across segments. Propose a coordination pairing when "
-    "your segment depends on a fact another segment owns. Set stable=true once you have nothing "
-    "further to add. Respond with JSON only."
+    "You are the worker agent for segment '{id}' in a coordinated multi-agent {kind} edit. "
+    "You do NOT rewrite the content here — that happens in a later phase. Your only job is to "
+    "COORDINATE: surface terminology, names, and facts that must stay consistent across "
+    "segments (so the Arbiter can freeze them into the shared canon), and flag any boundary "
+    "handoff you need with a neighbour. Keep your message SHORT — a few sentences of "
+    "coordination notes, never a draft of the rewritten text. Propose a pairing when your "
+    "segment depends on a fact another segment owns. Set stable=true once the canon your "
+    "segment needs is settled. Respond with JSON only."
 )
 
 WORKER_PROMPT = """\
@@ -43,8 +46,9 @@ Open questions:
 Last round's messages:
 {snapshot}
 
-Contribute your message for this round. Respond ONLY:
-{{"message": "...", "pairings": [{{"with": "<segment id>", "topic": "..."}}], "stable": false}}
+Contribute brief COORDINATION NOTES (terminology/facts to align + boundary handoffs),
+NOT a rewrite. Respond ONLY:
+{{"message": "<short coordination notes>", "pairings": [{{"with": "<segment id>", "topic": "..."}}], "stable": false}}
 """
 
 

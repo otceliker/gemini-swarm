@@ -18,26 +18,28 @@ from ..engine.modality import MutationResult, ValidationReport
 from ..engine.state import ExecutionPlan, Segment
 
 REWRITE_SYSTEM = (
-    "You rewrite ONE chunk of a larger work to satisfy a directive while staying consistent "
-    "with the shared canon. Preserve the original prose style and approximate length. "
-    "Output ONLY the rewritten chunk text — no preamble, no quotes, no commentary."
+    "You transform ONE passage of a larger work, applying the canon below. Be FAITHFUL to the "
+    "source: keep the SAME events in the SAME order, the same structure, and roughly the same "
+    "length. Restyle terminology, names, and framing per the canon — but do NOT add new "
+    "material, remove content, reorder passages, or pull in anything from neighbouring passages. "
+    "Output ONLY the transformed passage — no preamble, no quotes, no commentary."
 )
 
 REWRITE_PROMPT = """\
-Directive for this chunk: {directive}
+Transformation to apply: {directive}
 
-Canon/bible (stay consistent with this):
+Canon (terminology, names, and facts to use consistently):
 {bible}
 
-Global invariants:
+Invariants:
 {invariants}
 
-Original chunk:
+Passage to transform (preserve its content and ORDER exactly — restyle only):
 \"\"\"
 {text}
 \"\"\"
 
-Rewrite the chunk now. Output only the rewritten text.
+Output only the transformed passage.
 """
 
 VALIDATE_SYSTEM = (
