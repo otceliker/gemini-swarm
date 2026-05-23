@@ -42,6 +42,8 @@ GLYPH = {"idle": "⚪", "analyzing": "🔵", "mutating": "🟡", "passed": "🟢
 class EngineApp(App):
     TITLE = "gemini-swarm · universal editor"
     CSS = """
+    #tabs { height: 1fr; }          /* fill remaining space so the input stays visible */
+    #prompt { height: 3; }
     #run_row { height: 1fr; }
     #roster { width: 38; border-right: solid $accent; }
     #channel { width: 2fr; padding: 0 1; }
