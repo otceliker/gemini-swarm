@@ -8,7 +8,9 @@ from __future__ import annotations
 import os
 import re
 import urllib.request
+import zipfile
 from dataclasses import dataclass
+from html.parser import HTMLParser
 
 from ..engine._json import safe_extract_json
 from ..engine.arbiter import Completer
@@ -57,7 +59,65 @@ Respond ONLY: {{"ok": true, "issues": ["any inconsistency with the canon/invaria
 """
 
 
+class _HTMLText(HTMLParser):
+    """Strip an (X)HTML document to plain text, inserting paragraph breaks."""
+
+    _BLOCK = {"p", "div", "br", "h1", "h2", "h3", "h4", "h5", "h6",
+              "li", "blockquote", "tr", "section"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._buf: list[str] = []
+        self._skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style"):
+            self._skip += 1
+        elif tag in self._BLOCK:
+            self._buf.append("\n\n")
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style") and self._skip:
+            self._skip -= 1
+        elif tag in self._BLOCK:
+            self._buf.append("\n\n")
+
+    def handle_data(self, data):
+        if not self._skip:
+            self._buf.append(data)
+
+    def get_text(self) -> str:
+        text = "".join(self._buf)
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n[ \t]+", "\n", text)
+        return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def _doc_order_key(name: str) -> int:
+    nums = re.findall(r"\d+", name.rsplit("/", 1)[-1])
+    return int(nums[-1]) if nums else 0
+
+
+def epub_to_text(path: str) -> str:
+    """Extract plain text from an EPUB (zip of XHTML), in document order."""
+    with zipfile.ZipFile(path) as z:
+        docs = sorted(
+            (n for n in z.namelist() if n.lower().endswith((".xhtml", ".html", ".htm"))),
+            key=_doc_order_key,
+        )
+        parts = []
+        for name in docs:
+            parser = _HTMLText()
+            parser.feed(z.read(name).decode("utf-8", "replace"))
+            text = parser.get_text()
+            if text:
+                parts.append(text)
+    return "\n\n".join(parts)
+
+
 def _fetch(source: str) -> str:
+    if source.lower().endswith(".epub") and os.path.exists(source):
+        return epub_to_text(source)
     if source.startswith(("http://", "https://")):
         with urllib.request.urlopen(source) as resp:  # noqa: S310 (user-supplied URL is intended)
             return resp.read().decode("utf-8", "replace")
@@ -91,10 +151,15 @@ def _invariants(plan: ExecutionPlan) -> str:
 class ProseModality:
     reasoner: Completer
     max_chars: int = 4000
+    max_segments: int = 0          # 0 = all; >0 caps chunks (validate on a slice first)
+    start_segment: int = 0         # skip leading chunks (e.g. front matter)
     name: str = "prose"
 
     def ingest(self, source: str) -> list[Segment]:
         chunks = chunk_text(_fetch(source), self.max_chars)
+        if self.start_segment or self.max_segments:
+            end = self.start_segment + self.max_segments if self.max_segments > 0 else None
+            chunks = chunks[self.start_segment:end]
         segments = [
             Segment(id=f"chunk-{i:04d}", kind="prose",
                     summary=" ".join(c.split())[:80], meta={"text": c})

@@ -1,8 +1,10 @@
 """Prose modality: chunking (pure) + mutate/validate/stitch with a fake reasoner."""
 from __future__ import annotations
 
+import zipfile
+
 from swarm.engine.state import ExecutionPlan
-from swarm.modalities.prose import ProseModality, chunk_text
+from swarm.modalities.prose import ProseModality, chunk_text, epub_to_text
 
 
 class ProseFake:
@@ -27,6 +29,27 @@ def test_ingest_chunks_and_links_adjacency():
     assert len(segs) >= 2
     assert segs[1].id in segs[0].relations          # forward link
     assert segs[0].id in segs[1].relations          # back link
+
+
+def test_max_segments_caps_chunks():
+    m = ProseModality(reasoner=ProseFake(), max_chars=10, max_segments=2)
+    segs = m.ingest("aaaa\n\nbbbb\n\ncccc\n\ndddd")
+    assert len(segs) == 2
+
+
+def test_epub_to_text_extracts_in_order_and_strips_scripts(tmp_path):
+    path = tmp_path / "book.epub"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("OEBPS/x-0.xhtml",
+                   "<html><body><h1>Book I</h1><p>Sing, O Muse.</p>"
+                   "<script>tracker()</script></body></html>")
+        z.writestr("OEBPS/x-1.xhtml",
+                   "<html><body><p>Tell me, O Muse, of Ulysses.</p></body></html>")
+    text = epub_to_text(str(path))
+    assert "Sing, O Muse." in text
+    assert "Ulysses" in text
+    assert "tracker()" not in text                       # script content stripped
+    assert text.index("Sing") < text.index("Ulysses")    # document order preserved
 
 
 def test_mutate_validate_and_stitch():
