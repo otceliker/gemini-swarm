@@ -30,7 +30,7 @@ def _printer(ev: Event) -> None:
         print(f"\n-- round {p['round']}/{p['of']} --")
     elif k == E.MESSAGE:
         flag = " (stable)" if p.get("stable") else ""
-        print(f"  [{p['author']}]{flag}: {p['text'][:160]}")
+        print(f"  [{p['author']}]{flag}: {p['text']}")
     elif k == E.PAIRING:
         print(f"  pairing {p['a']} <-> {p['b']}: {p['topic']}")
     elif k == E.DECISION:

@@ -94,9 +94,9 @@ class EngineApp(App):
             self.state[p["author"]] = "analyzing"
             self._render_roster()
             flag = " [green](stable)[/]" if p.get("stable") else ""
-            self.channel.write(f"[cyan]{p['author']}[/]{flag} ▸ {p['text'][:240]}")
+            self.channel.write(f"[cyan]{p['author']}[/]{flag} ▸ {p['text']}")
         elif k == E.PAIRING:
-            self.channel.write(f"   [magenta]⇄ {p['a']} → {p['b']}[/] [dim]{p['topic'][:120]}[/]")
+            self.channel.write(f"   [magenta]⇄ {p['a']} → {p['b']}[/] [dim]{p['topic']}[/]")
         elif k == E.DECISION:
             self.bible.write(f"❄ {p['text']}")
         elif k == E.PLAN:
