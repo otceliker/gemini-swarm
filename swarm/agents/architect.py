@@ -15,6 +15,7 @@ import json
 import re
 from dataclasses import dataclass, field
 
+from ..mapping.partition import partition_modules
 from ..protocol.models import Domain, DomainDirective, LeadReport, Topology
 from .backend import Reasoner
 
@@ -54,6 +55,21 @@ User intent:
 Produce directives as ONLY this JSON shape, including only domains that need changes:
 
 {{"directives": [{{"domain": "<existing domain name>", "instruction": "what this domain must do", "target_modules": ["a.b", ...]}}]}}
+"""
+
+NAME_SYSTEM = (
+    "You name and describe code domains. Given clusters of Python modules that were "
+    "grouped by dependency-graph analysis, give each cluster a short snake_case name and "
+    "a one-sentence rationale. Respond with JSON only, no prose."
+)
+
+NAME_TEMPLATE = """\
+A repository's modules were grouped into {n} clusters by dependency-graph community detection:
+
+{clusters}
+
+For EACH cluster, in the SAME ORDER, give a short snake_case `name` and a one-sentence `rationale`.
+Respond with ONLY: {{"domains": [{{"name": "...", "rationale": "..."}}]}}
 """
 
 
@@ -127,7 +143,62 @@ class Architect:
     def __init__(self, reasoner: Reasoner):
         self.reasoner = reasoner
 
-    def segment(self, topology: Topology) -> SegmentationResult:
+    def segment(self, topology: Topology, *, use_llm_partition: bool = False) -> SegmentationResult:
+        """Partition the repo into domains.
+
+        Default (hybrid): a deterministic graph-community partition does the grouping,
+        then one cheap LLM call only names/describes the clusters. Set
+        `use_llm_partition=True` to let the LLM decide the grouping too (non-deterministic).
+        """
+        if use_llm_partition:
+            return self._segment_with_llm(topology)
+
+        clusters = partition_modules(topology)
+        names = self._name_clusters(clusters)
+        domains = [Domain(name=name, module_names=cluster, rationale=rationale)
+                   for cluster, (name, rationale) in zip(clusters, names)]
+        assigned = {m for cluster in clusters for m in cluster}
+        assignable = {m.module_name for m in topology.modules
+                      if m.module_name and (m.symbols or m.internal_deps)}
+        return SegmentationResult(
+            domains=domains, unassigned=sorted(assignable - assigned),
+            raw="(hybrid: louvain partition + llm naming)")
+
+    def _name_clusters(self, clusters: list[list[str]]) -> list[tuple[str, str]]:
+        """One cheap LLM call to name clusters; deterministic fallback if it fails."""
+        raw = []
+        if clusters:
+            rendered = "\n".join(f"Cluster {i}: {', '.join(c)}" for i, c in enumerate(clusters))
+            try:
+                data = _extract_json(self.reasoner.complete(
+                    NAME_SYSTEM, NAME_TEMPLATE.format(n=len(clusters), clusters=rendered)))
+                raw = data["domains"] if isinstance(data, dict) else data
+            except Exception:
+                raw = []
+
+        out: list[tuple[str, str]] = []
+        used: set[str] = set()
+        for i, cluster in enumerate(clusters):
+            name, rationale = "", ""
+            if i < len(raw) and isinstance(raw[i], dict):
+                name = (raw[i].get("name") or "").strip()
+                rationale = raw[i].get("rationale", "")
+            if not name or name in used:
+                name = self._auto_name(cluster, used)
+            used.add(name)
+            out.append((name, rationale))
+        return out
+
+    @staticmethod
+    def _auto_name(cluster: list[str], used: set[str]) -> str:
+        prefixes = {m.split(".")[0] for m in cluster}
+        base = prefixes.pop() if len(prefixes) == 1 else (cluster[0].split(".")[0] if cluster else "domain")
+        name, k = base, 2
+        while name in used:
+            name, k = f"{base}_{k}", k + 1
+        return name
+
+    def _segment_with_llm(self, topology: Topology) -> SegmentationResult:
         text = self.reasoner.complete(
             SYSTEM_INSTRUCTION, PROMPT_TEMPLATE.format(digest=digest_topology(topology)))
         data = _extract_json(text)

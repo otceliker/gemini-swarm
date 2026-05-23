@@ -34,6 +34,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--subdir", default=None, help="only map this subdirectory (e.g. fastapi)")
     parser.add_argument("--offline", action="store_true", help="map only; skip the Architect LLM")
     parser.add_argument("--task", default=None, help="run the autonomous modification loop with this intent")
+    parser.add_argument("--llm-segment", action="store_true",
+                        help="let the LLM decide the domain partition (non-deterministic) "
+                             "instead of deterministic graph clustering")
     args = parser.parse_args(argv)
     console = Console()
 
@@ -54,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     console.rule("[bold]Phase 1.4: Architect Segmentation")
     architect = Architect(GeminiReasoner())
     with console.status("Architect is partitioning the codebase…"):
-        seg = architect.segment(topology)
+        seg = architect.segment(topology, use_llm_partition=args.llm_segment)
     console.print(_domains_table(seg.domains, seg.unassigned))
     if seg.unassigned:
         console.print(f"[yellow]Unassigned (→ Architect/common):[/] {', '.join(seg.unassigned)}")

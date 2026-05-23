@@ -31,7 +31,6 @@ class SwarmApp(App):
         padding: 1 2;
     }
     #convo { padding: 0 1; }
-    #prompt { dock: bottom; }
     """
     BINDINGS = [("ctrl+q", "quit", "Quit")]
 

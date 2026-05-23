@@ -8,6 +8,7 @@ import pytest
 from swarm.agents.architect import Architect, _extract_json
 from swarm.agents.backend import FakeReasoner
 from swarm.mapping.ast_mapper import map_repository
+from swarm.mapping.partition import partition_modules
 from swarm.protocol.models import ContractChange, Domain, LeadReport
 
 
@@ -16,6 +17,16 @@ def _repo(base: Path) -> None:
     (base / "pkg" / "__init__.py").write_text("")
     (base / "pkg" / "auth.py").write_text("def login(u: str) -> bool:\n    return True\n")
     (base / "pkg" / "api.py").write_text("from .auth import login\ndef route():\n    return login('x')\n")
+
+
+def _two_group_repo(base: Path) -> None:
+    """Two dependency-disjoint groups: {a,b} and {x,y}."""
+    (base / "pkg").mkdir()
+    (base / "pkg" / "__init__.py").write_text("")
+    (base / "pkg" / "a.py").write_text("def fa() -> int:\n    return 1\n")
+    (base / "pkg" / "b.py").write_text("from .a import fa\ndef fb():\n    return fa()\n")
+    (base / "pkg" / "x.py").write_text("def fx() -> int:\n    return 1\n")
+    (base / "pkg" / "y.py").write_text("from .x import fx\ndef fy():\n    return fx()\n")
 
 
 # --- JSON extraction -------------------------------------------------------
@@ -34,9 +45,45 @@ def test_extract_json_embedded_braces_in_strings():
     assert _extract_json(text)["domains"][0]["rationale"] == "uses {curly} braces"
 
 
-# --- Segmentation ----------------------------------------------------------
+# --- Segmentation: hybrid (deterministic partition + LLM naming) -----------
 
-def test_segment_assigns_and_validates(tmp_path: Path):
+def test_partition_is_deterministic_and_separates_groups(tmp_path: Path):
+    _two_group_repo(tmp_path)
+    topo = map_repository(tmp_path)
+    c1 = partition_modules(topo)
+    c2 = partition_modules(topo)
+    assert c1 == c2  # seeded → reproducible
+    groups = [set(c) for c in c1]
+    assert {"pkg.a", "pkg.b"} in groups
+    assert {"pkg.x", "pkg.y"} in groups
+
+
+def test_segment_hybrid_names_algorithmic_clusters(tmp_path: Path):
+    _two_group_repo(tmp_path)
+    topo = map_repository(tmp_path)
+    reasoner = FakeReasoner(responses=[
+        '{"domains": [{"name": "alpha", "rationale": "a/b group"}, '
+        '{"name": "beta", "rationale": "x/y group"}]}'
+    ])
+    seg = Architect(reasoner).segment(topo)  # hybrid is the default
+    assert sorted(d.name for d in seg.domains) == ["alpha", "beta"]
+    # the module grouping comes from the deterministic partition, not the LLM
+    grouping = sorted(tuple(sorted(d.module_names)) for d in seg.domains)
+    assert grouping == [("pkg.a", "pkg.b"), ("pkg.x", "pkg.y")]
+
+
+def test_segment_hybrid_autonames_when_naming_fails(tmp_path: Path):
+    _two_group_repo(tmp_path)
+    topo = map_repository(tmp_path)
+    seg = Architect(FakeReasoner(responses=["sorry, no json here"])).segment(topo)
+    assert len(seg.domains) == 2
+    assert all(d.name for d in seg.domains)          # deterministic fallback names
+    assert len({d.name for d in seg.domains}) == 2   # and unique
+
+
+# --- Segmentation: pure-LLM path (use_llm_partition=True) ------------------
+
+def test_llm_segment_assigns_and_validates(tmp_path: Path):
     _repo(tmp_path)
     topo = map_repository(tmp_path)
     reasoner = FakeReasoner(responses=[
@@ -45,28 +92,29 @@ def test_segment_assigns_and_validates(tmp_path: Path):
         '{"name": "web", "module_names": ["pkg.api", "pkg.nonexistent"], "rationale": "routing"}'
         ']}'
     ])
-    result = Architect(reasoner).segment(topo)
+    result = Architect(reasoner).segment(topo, use_llm_partition=True)
     names = {d.name: d for d in result.domains}
     assert names["auth"].module_names == ["pkg.auth"]
     assert names["web"].module_names == ["pkg.api"]  # unknown module dropped
     assert result.unassigned == []
 
 
-def test_segment_reports_unassigned(tmp_path: Path):
+def test_llm_segment_reports_unassigned(tmp_path: Path):
     _repo(tmp_path)
     topo = map_repository(tmp_path)
     reasoner = FakeReasoner(responses=[
         '{"domains": [{"name": "auth", "module_names": ["pkg.auth"], "rationale": "x"}]}'
     ])
-    result = Architect(reasoner).segment(topo)
+    result = Architect(reasoner).segment(topo, use_llm_partition=True)
     assert "pkg.api" in result.unassigned
 
 
-def test_segment_raises_on_no_json(tmp_path: Path):
+def test_llm_segment_raises_on_no_json(tmp_path: Path):
     _repo(tmp_path)
     topo = map_repository(tmp_path)
     with pytest.raises(ValueError):
-        Architect(FakeReasoner(responses=["I could not complete the task."])).segment(topo)
+        Architect(FakeReasoner(responses=["I could not complete the task."])).segment(
+            topo, use_llm_partition=True)
 
 
 # --- Planning --------------------------------------------------------------
