@@ -43,7 +43,8 @@ class Engine:
         # 1. ingest + segment
         self._emit(E.PHASE, phase="ingest")
         segments = self.modality.ingest(source)
-        self._emit(E.SEGMENTS, segments=[s.id for s in segments])
+        self._emit(E.SEGMENTS,
+                   segments=[{"id": s.id, "name": s.summary or s.id} for s in segments])
 
         # 2. deliberate (emits its own ROUND/MESSAGE/DECISION/PLAN events)
         medium, plan = self.deliberation.run(goal, segments)

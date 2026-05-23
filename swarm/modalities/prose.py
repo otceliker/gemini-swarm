@@ -9,6 +9,7 @@ import os
 import re
 import urllib.request
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from html.parser import HTMLParser
 
@@ -45,6 +46,11 @@ Output only the transformed passage.
 VALIDATE_SYSTEM = (
     "You check whether a rewritten chunk respects the shared canon and the global invariants. "
     "Respond with JSON only."
+)
+
+TITLE_SYSTEM = (
+    "Give a SHORT 3-6 word title naming what happens in this passage. "
+    "Output ONLY the title — no quotes, no trailing punctuation."
 )
 
 VALIDATE_PROMPT = """\
@@ -155,6 +161,7 @@ class ProseModality:
     max_chars: int = 4000
     max_segments: int = 0          # 0 = all; >0 caps chunks (validate on a slice first)
     start_segment: int = 0         # skip leading chunks (e.g. front matter)
+    title_chunks: bool = True      # let each chunk title itself (LLM) at ingest
     name: str = "prose"
 
     def ingest(self, source: str) -> list[Segment]:
@@ -164,15 +171,29 @@ class ProseModality:
             chunks = chunks[self.start_segment:end]
         segments = [
             Segment(id=f"chunk-{i:04d}", kind="prose",
-                    summary=" ".join(c.split())[:80], meta={"text": c})
+                    summary=" ".join(c.split())[:60], meta={"text": c})
             for i, c in enumerate(chunks)
         ]
+        if self.title_chunks and segments:   # chunks name themselves, in parallel
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                titles = list(pool.map(lambda s: self._title(s.meta["text"]), segments))
+            for seg, title in zip(segments, titles):
+                if title:
+                    seg.summary = title
         for i, seg in enumerate(segments):  # adjacency relations (continuity coupling)
             if i > 0:
                 seg.relations.append(segments[i - 1].id)
             if i < len(segments) - 1:
                 seg.relations.append(segments[i + 1].id)
         return segments
+
+    def _title(self, text: str) -> str:
+        try:
+            raw = self.reasoner.complete(TITLE_SYSTEM, f"Passage:\n{text[:1200]}\n\nTitle:")
+            line = raw.strip().strip('"').splitlines()[0] if raw.strip() else ""
+            return line[:60] or " ".join(text.split()[:6])
+        except Exception:
+            return " ".join(text.split()[:6])
 
     def mutate(self, segment: Segment, plan: ExecutionPlan, feedback: str = "") -> MutationResult:
         corrections = (f"\nFix these issues flagged in a prior validation:\n{feedback}\n"

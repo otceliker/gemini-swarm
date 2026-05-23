@@ -25,7 +25,8 @@ def _printer(ev: Event) -> None:
     if k == E.PHASE:
         print(f"\n=== PHASE: {p['phase'].upper()} ===")
     elif k == E.SEGMENTS:
-        print(f"{len(p['segments'])} segments: {p['segments']}")
+        names = [s.get("name", s["id"]) if isinstance(s, dict) else s for s in p["segments"]]
+        print(f"{len(names)} segments: {names}")
     elif k == E.ROUND:
         print(f"\n-- round {p['round']}/{p['of']} --")
     elif k == E.MESSAGE:

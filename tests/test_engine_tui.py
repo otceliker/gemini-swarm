@@ -17,7 +17,10 @@ def test_engine_app_mounts_and_renders_events():
             assert app.query_one("#channel")
             assert app.query_one("#bible")
             # feed a few events the way the bus would, on the UI thread
-            app._on_event(Event(E.SEGMENTS, {"segments": ["chunk-0000", "chunk-0001"]}))
+            app._on_event(Event(E.SEGMENTS, {"segments": [
+                {"id": "chunk-0000", "name": "The Proem"},
+                {"id": "chunk-0001", "name": "Council of the Gods"}]}))
+            assert app.names["chunk-0000"] == "The Proem"
             app._on_event(Event(E.MUTATION, {"segment": "chunk-0000", "state": "start"}))
             app._on_event(Event(E.MUTATION,
                                 {"segment": "chunk-0000", "state": "done", "ok": True, "summary": "x"}))
