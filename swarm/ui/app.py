@@ -26,18 +26,28 @@ from ..protocol.models import DomainDirective
 GLYPH = {"idle": "⚪", "analyzing": "🔵", "mutating": "🟡", "passed": "🟢", "failed": "🔴"}
 
 
-def parse_mentions(text: str, valid: set[str]) -> tuple[list[str], str]:
-    """Split '@domain do thing' into (['domain'], 'do thing'). Only known domains count."""
-    mentioned: list[str] = []
+def parse_mentions(text: str, valid: set[str]) -> tuple[list[str], list[str], str]:
+    """Split '@domain do thing' into (matched_domains, unknown_mentions, instruction).
+
+    Matching is case-insensitive and returns canonical domain names. Unknown
+    @mentions are reported separately so the UI can flag a typo instead of
+    silently treating it as a question for the Architect.
+    """
+    canon = {v.lower(): v for v in valid}
+    matched: list[str] = []
+    unknown: list[str] = []
     rest: list[str] = []
     for tok in text.split():
-        name = tok[1:] if tok.startswith("@") else None
-        if name and name in valid:
-            if name not in mentioned:
-                mentioned.append(name)
+        if tok.startswith("@") and len(tok) > 1:
+            name = canon.get(tok[1:].lower())
+            if name:
+                if name not in matched:
+                    matched.append(name)
+            else:
+                unknown.append(tok[1:])
         else:
             rest.append(tok)
-    return mentioned, " ".join(rest)
+    return matched, unknown, " ".join(rest)
 
 
 class SwarmApp(App):
@@ -115,7 +125,7 @@ class SwarmApp(App):
             self.run_pipeline(url, subdir)
         elif self.phase == "chat":
             self.say(f"\n[b]you ▸[/] {value}")
-            mentions, instruction = parse_mentions(value, {d.name for d in self.domains})
+            mentions, unknown, instruction = parse_mentions(value, {d.name for d in self.domains})
             if mentions and instruction.strip():
                 event.input.disabled = True
                 event.input.placeholder = "working in sandbox…"
@@ -124,6 +134,10 @@ class SwarmApp(App):
             elif mentions:
                 self.say(f"[yellow]add an instruction after the mention, e.g.[/] "
                          f"[b]@{mentions[0]} add input validation[/]")
+            elif unknown:
+                names = ", ".join(d.name for d in self.domains)
+                self.say(f"[yellow]no domain called[/] [b]@{unknown[0]}[/] — "
+                         f"available: [b]{names}[/]")
             else:
                 self.ask_architect(value)
 
@@ -156,6 +170,9 @@ class SwarmApp(App):
             self.say(f"  [b cyan]{d.name}[/] — [dim]{d.rationale}[/]")
         if seg.unassigned:
             self.say(f"  [yellow]unassigned → common:[/] {', '.join(seg.unassigned)}")
+        if seg.domains:
+            self.say(f"[dim]Ask the Architect anything, or run a change with[/] "
+                     f"[b]@{seg.domains[0].name} <instruction>[/][dim].[/]")
         self.phase = "chat"
         inp = self.query_one("#prompt", Input)
         inp.disabled = False
@@ -241,6 +258,9 @@ class SwarmApp(App):
     @work(thread=True)
     def run_leads(self, domain_names: list[str], instruction: str) -> None:
         try:
+            # Immediate feedback that the mention registered, before the slow bootstrap.
+            for n in domain_names:
+                self.call_from_thread(self._set_state, n, "analyzing")
             self._ensure_sandbox()
             seen: set = set()
             queue = [DomainDirective(domain=n, instruction=instruction, kind="primary")
