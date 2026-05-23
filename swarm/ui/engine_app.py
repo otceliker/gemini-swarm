@@ -31,7 +31,7 @@ from ..modalities.prose import ProseModality
 
 DEFAULT_SOURCE = os.path.expanduser("~/Downloads/pg1727-images-3.epub")
 MAX_CHARS = 4000
-MAX_SEGMENTS = 20
+MAX_SEGMENTS = 4
 START_SEGMENT = 5
 ROUNDS = 4
 OUT = ".workspaces/engine_out.txt"
