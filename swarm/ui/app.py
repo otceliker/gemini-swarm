@@ -42,6 +42,9 @@ class SwarmApp(App):
         self.topology = None
         self.domains: list = []
         self.roster_state: dict[str, str] = {}
+        self.repo_url = ""
+        self.subdir = ""
+        self.chat_history: list[str] = []
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -93,6 +96,7 @@ class SwarmApp(App):
     def run_pipeline(self, url: str, subdir: str) -> None:
         from ..ingest import clone_repo
         from ..mapping.ast_mapper import map_repository
+        self.repo_url, self.subdir = url, subdir
         try:
             path = clone_repo(url)
             self.call_from_thread(self.say, f"[green]✓[/] cloned → [dim]{path}[/]")
@@ -128,17 +132,37 @@ class SwarmApp(App):
         inp.placeholder = "GitHub repo URL"
         self.phase = "url"
 
+    def _grounding(self) -> str:
+        from ..agents.architect import digest_topology
+        lines = [f"Repository (ground truth): {self.repo_url}"]
+        if self.subdir:
+            lines.append(f"Mapped package/subdir: {self.subdir}")
+        lines.append("\nDomains:")
+        for d in self.domains:
+            lines.append(f"- {d.name}: {d.rationale}")
+            lines.append(f"    modules: {', '.join(d.module_names)}")
+        lines.append("\nDependency map (module | internal deps | public symbols):")
+        lines.append(digest_topology(self.topology))
+        return "\n".join(lines)
+
     @work(thread=True)
     def ask_architect(self, message: str) -> None:
-        system = ("You are the Architect of a multi-agent code swarm. Answer concisely about "
-                  "the repository's structure, its domains, and how a change would be planned.")
-        context = (f"The codebase was split into these domains: "
-                   f"{[d.name for d in self.domains]}.\n\nUser question: {message}")
+        system = (
+            "You are the Architect of a multi-agent code swarm that just analyzed the "
+            "repository described below. Answer questions about THIS specific repository, "
+            "treating the repo URL and dependency map as ground truth — do not guess what "
+            "project it is, you are told. Be concise and concrete."
+        )
+        history = "\n".join(self.chat_history[-12:])
+        context = (f"{self._grounding()}\n\n--- conversation so far ---\n"
+                   f"{history}\nUser: {message}\nArchitect:")
         try:
-            reply = self.architect.reasoner.complete(system, context)
+            reply = (self.architect.reasoner.complete(system, context) or "").strip()
         except Exception as exc:
             reply = f"[error] {exc}"
-        self.call_from_thread(self.say, f"[b]🏛  Architect ▸[/] {reply.strip()}")
+        self.chat_history.append(f"User: {message}")
+        self.chat_history.append(f"Architect: {reply}")
+        self.call_from_thread(self.say, f"[b]🏛  Architect ▸[/] {reply}")
 
 
 def main() -> None:
