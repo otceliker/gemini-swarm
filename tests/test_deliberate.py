@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from swarm.engine.arbiter import Arbiter
 from swarm.engine.deliberate import Deliberation
-from swarm.engine.events import DECISION, PLAN, ROUND, EventBus
+from swarm.engine.events import ARBITER, DECISION, PLAN, ROUND, EventBus
 from swarm.engine.state import Segment
 
 SEGS = [Segment(id="s1", kind="prose", summary="chapter 1"),
@@ -24,8 +24,10 @@ class RoleFake:
         self.closes = closes
         self.plan = plan
         self.close_i = 0
+        self.prompts: list[tuple[str, str]] = []
 
     def complete(self, system: str, prompt: str) -> str:
+        self.prompts.append((system, prompt))
         s = system.lower()
         if "worker agent" in s:               # check worker first (its prompt mentions "Arbiter")
             return self.worker
@@ -67,6 +69,20 @@ def test_decisions_frozen_append_only_across_rounds():
     dup = '{"decisions":["F is canon"],"converged":false}'
     medium, _ = _delib(WORKER, [dup], PLAN_FULL, rounds=3).run("g", SEGS)
     assert medium.decisions == ["F is canon"]   # repeated across rounds, frozen once
+
+
+def test_arbiter_note_streamed_and_seen_next_round():
+    bus = EventBus()
+    close_note = '{"decisions":[],"note":"Align on the terminology for the gods.","converged":false}'
+    delib = _delib(WORKER, [close_note], PLAN_FULL, rounds=2, bus=bus)
+    delib.run("g", SEGS)
+    fake = delib.worker_reasoner
+    # the Arbiter's note was emitted onto the stream
+    assert any(e.kind == ARBITER and "terminology for the gods" in e.payload["text"]
+               for e in bus.history)
+    # and round-2 workers received it in their prompt
+    worker_prompts = [pr for sys, pr in fake.prompts if "worker agent" in sys.lower()]
+    assert any("Align on the terminology for the gods" in pr for pr in worker_prompts)
 
 
 def test_plan_fallback_fills_missing_directives():

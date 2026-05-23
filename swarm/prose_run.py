@@ -35,6 +35,8 @@ def _printer(ev: Event) -> None:
         print(f"  pairing {p['a']} <-> {p['b']}: {p['topic']}")
     elif k == E.DECISION:
         print(f"  FROZEN: {p['text']}")
+    elif k == E.ARBITER:
+        print(f"  🏛 Arbiter ▸ {p['text']}")
     elif k == E.PLAN:
         print(f"  PLAN: {len(p['directives'])} directives; invariants={p['invariants']}")
     elif k == E.MUTATION and p.get("state") == "done":

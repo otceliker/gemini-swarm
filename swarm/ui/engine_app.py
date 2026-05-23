@@ -99,6 +99,8 @@ class EngineApp(App):
             self.channel.write(f"   [magenta]⇄ {p['a']} → {p['b']}[/] [dim]{p['topic']}[/]")
         elif k == E.DECISION:
             self.bible.write(f"❄ {p['text']}")
+        elif k == E.ARBITER:
+            self.channel.write(f"[b yellow]🏛 Arbiter[/] ▸ [yellow]{p['text']}[/]")
         elif k == E.PLAN:
             self.channel.write(f"[b green]✓ plan ready[/] [dim]{len(p['directives'])} directives[/]")
         elif k == E.MUTATION:

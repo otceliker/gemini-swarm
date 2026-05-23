@@ -41,6 +41,7 @@ class SharedMedium:
     """The shared deliberation state. `decisions` are append-only (anti-oscillation)."""
 
     bible: str = ""                                        # evolving canon / invariants
+    arbiter_note: str = ""                                 # latest Arbiter steering note (workers read it)
     messages: list[Message] = field(default_factory=list)
     decisions: list[str] = field(default_factory=list)     # frozen; never rewritten
     open_questions: list[str] = field(default_factory=list)

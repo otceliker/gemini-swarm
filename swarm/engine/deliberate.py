@@ -8,6 +8,7 @@ emits the ExecutionPlan.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 from . import events as E
@@ -24,7 +25,8 @@ WORKER_SYSTEM = (
     "handoff you need with a neighbour. Keep your message SHORT — a few sentences of "
     "coordination notes, never a draft of the rewritten text. Propose a pairing when your "
     "segment depends on a fact another segment owns. Set stable=true once the canon your "
-    "segment needs is settled. Respond with JSON only."
+    "segment needs is settled. An Arbiter posts brief guidance to the room after each round — "
+    "keep it in mind, but do NOT reply to or address the Arbiter directly. Respond with JSON only."
 )
 
 WORKER_PROMPT = """\
@@ -42,6 +44,9 @@ Canon/bible so far:
 
 Open questions:
 {open_questions}
+
+Arbiter's latest guidance (keep in mind; do not address it directly):
+{arbiter_note}
 
 Last round's messages:
 {snapshot}
@@ -66,6 +71,7 @@ class Deliberation:
     arbiter: Arbiter
     rounds: int = 10
     bus: EventBus | None = None
+    max_workers: int = 8           # workers in a round act simultaneously (Jacobi) -> run in parallel
 
     def _emit(self, kind: str, **payload) -> None:
         if self.bus is not None:
@@ -78,16 +84,22 @@ class Deliberation:
         for r in range(1, self.rounds + 1):
             self._emit(E.ROUND, round=r, of=self.rounds)
             snapshot = medium.round_snapshot(r - 1)   # Jacobi: same prior snapshot for all
-            round_messages: list[Message] = []
+            results: list[Message | None] = [None] * len(segments)
 
-            for seg in segments:
-                msg = self._worker_turn(goal, seg, medium, snapshot, r)
-                medium.messages.append(msg)
-                round_messages.append(msg)
-                self._emit(E.MESSAGE, author=msg.author, round=r, text=msg.text, stable=msg.stable)
-                for p in msg.pairings:
-                    medium.pairings.append(p)
-                    self._emit(E.PAIRING, a=p.a, b=p.b, topic=p.topic)
+            with ThreadPoolExecutor(max_workers=max(1, self.max_workers)) as pool:
+                futures = {pool.submit(self._worker_turn, goal, seg, medium, snapshot, r): i
+                           for i, seg in enumerate(segments)}
+                for fut in as_completed(futures):     # emit live as each worker finishes
+                    i = futures[fut]
+                    msg = fut.result()
+                    results[i] = msg
+                    self._emit(E.MESSAGE, author=msg.author, round=r, text=msg.text, stable=msg.stable)
+                    for p in msg.pairings:
+                        medium.pairings.append(p)
+                        self._emit(E.PAIRING, a=p.a, b=p.b, topic=p.topic)
+
+            round_messages = [m for m in results if m is not None]
+            medium.messages.extend(round_messages)    # appended in segment order (deterministic)
 
             verdict = self.arbiter.close_round(goal, medium, round_messages)
             for decision in verdict.new_decisions:
@@ -96,6 +108,9 @@ class Deliberation:
             if verdict.bible:
                 medium.bible = verdict.bible
             medium.open_questions = verdict.open_questions
+            if verdict.note:                          # Arbiter steers the room for next round
+                medium.arbiter_note = verdict.note
+                self._emit(E.ARBITER, round=r, text=verdict.note)
 
             if verdict.converged or (round_messages and all(m.stable for m in round_messages)):
                 break
@@ -110,7 +125,9 @@ class Deliberation:
             goal=goal, sid=seg.id, summary=seg.summary or "(none)",
             relations=", ".join(seg.relations) or "(none)",
             decisions=_bullets(medium.decisions), bible=medium.bible or "(empty)",
-            open_questions=_bullets(medium.open_questions), snapshot=_render_messages(snapshot),
+            open_questions=_bullets(medium.open_questions),
+            arbiter_note=medium.arbiter_note or "(none yet)",
+            snapshot=_render_messages(snapshot),
         )
         text = self.worker_reasoner.complete(
             WORKER_SYSTEM.format(id=seg.id, kind=seg.kind), prompt)

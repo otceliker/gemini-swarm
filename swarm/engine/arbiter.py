@@ -23,8 +23,10 @@ CLOSE_SYSTEM = (
     "You are the Arbiter, the senior editor converging a multi-agent discussion toward a "
     "consistent plan. Read this round's messages and freeze concrete DECISIONS that are now "
     "agreed. Decisions are APPEND-ONLY: only add new ones, never contradict earlier decisions. "
-    "Maintain a short canon/bible of facts and voice. List remaining open questions. Decide "
-    "whether the discussion has converged. Respond with JSON only."
+    "Maintain a short canon/bible of facts and voice. List remaining open questions. Also write "
+    "a brief NOTE to the room — one or two sentences of guidance steering everyone toward "
+    "convergence (a heads-up or nudge, not a question; workers keep it in mind, they do not reply "
+    "to you). Decide whether the discussion has converged. Respond with JSON only."
 )
 
 CLOSE_PROMPT = """\
@@ -44,7 +46,8 @@ Open coordination pairings:
 
 Respond ONLY:
 {{"decisions": ["a newly agreed decision", "..."], "bible": "updated canon text",
-  "open_questions": ["..."], "converged": false}}
+  "open_questions": ["..."], "note": "one or two sentences of guidance to the room",
+  "converged": false}}
 """
 
 PLAN_SYSTEM = (
@@ -84,6 +87,7 @@ class Verdict:
     new_decisions: list[str] = field(default_factory=list)
     bible: str = ""
     open_questions: list[str] = field(default_factory=list)
+    note: str = ""
     converged: bool = False
 
 
@@ -106,6 +110,7 @@ class Arbiter:
             new_decisions=[d for d in raw_decisions if isinstance(d, str)],
             bible=data.get("bible", "") or "",
             open_questions=[q for q in data.get("open_questions", []) if isinstance(q, str)],
+            note=data.get("note", "") or "",
             converged=bool(data.get("converged", False)),
         )
 

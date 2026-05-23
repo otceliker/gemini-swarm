@@ -16,6 +16,7 @@ ROUND = "round"            # {"round": int, "of": int}
 MESSAGE = "message"        # {"author": id, "round": int, "text": str, "stable": bool}
 PAIRING = "pairing"        # {"a": id, "b": id, "topic": str}
 DECISION = "decision"      # {"text": str}   (a newly frozen decision)
+ARBITER = "arbiter"        # {"round": int, "text": str}  (Arbiter's steering note to the room)
 PLAN = "plan"              # {"directives": {...}, "invariants": [...]}
 MUTATION = "mutation"      # {"segment": id, "state": "start"|"done", "ok": bool, "summary": str}
 VALIDATION = "validation"  # {"segment": id, "ok": bool, "issues": [...]}
