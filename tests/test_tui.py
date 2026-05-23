@@ -3,7 +3,15 @@ from __future__ import annotations
 
 import asyncio
 
-from swarm.ui.app import SwarmApp
+from swarm.ui.app import SwarmApp, parse_mentions
+
+
+def test_parse_mentions_routes_domains_vs_chat():
+    valid = {"security", "openapi"}
+    assert parse_mentions("@security add rate limiting", valid) == (["security"], "add rate limiting")
+    assert parse_mentions("what does @nonexistent do?", valid) == ([], "what does @nonexistent do?")
+    assert parse_mentions("@security @openapi sync schema", valid) == (["security", "openapi"], "sync schema")
+    assert parse_mentions("just a plain question", valid) == ([], "just a plain question")
 
 
 def test_app_mounts_and_starts_in_url_phase():

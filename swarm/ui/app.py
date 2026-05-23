@@ -18,9 +18,26 @@ from textual.containers import Horizontal
 from textual.widgets import Footer, Header, Input, RichLog, Static
 
 from ..agents.architect import Architect
-from ..agents.backend import GeminiReasoner
+from ..agents.backend import GeminiReasoner, ManagedAgentBackend
+from ..agents.lead import DomainLead
+from ..orchestrator import MAX_PROPAGATION_DIRECTIVES, Orchestrator
+from ..protocol.models import DomainDirective
 
 GLYPH = {"idle": "⚪", "analyzing": "🔵", "mutating": "🟡", "passed": "🟢", "failed": "🔴"}
+
+
+def parse_mentions(text: str, valid: set[str]) -> tuple[list[str], str]:
+    """Split '@domain do thing' into (['domain'], 'do thing'). Only known domains count."""
+    mentioned: list[str] = []
+    rest: list[str] = []
+    for tok in text.split():
+        name = tok[1:] if tok.startswith("@") else None
+        if name and name in valid:
+            if name not in mentioned:
+                mentioned.append(name)
+        else:
+            rest.append(tok)
+    return mentioned, " ".join(rest)
 
 
 class SwarmApp(App):
@@ -46,6 +63,9 @@ class SwarmApp(App):
         self.repo_url = ""
         self.subdir = ""
         self.chat_history: list[str] = []
+        self.backend = None              # ManagedAgentBackend, created on first @domain
+        self.orch: Orchestrator | None = None
+        self.env_id = ""                 # shared sandbox, provisioned once per session
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -95,7 +115,17 @@ class SwarmApp(App):
             self.run_pipeline(url, subdir)
         elif self.phase == "chat":
             self.say(f"\n[b]you ▸[/] {value}")
-            self.ask_architect(value)
+            mentions, instruction = parse_mentions(value, {d.name for d in self.domains})
+            if mentions and instruction.strip():
+                event.input.disabled = True
+                event.input.placeholder = "working in sandbox…"
+                self.phase = "busy"
+                self.run_leads(mentions, instruction)
+            elif mentions:
+                self.say(f"[yellow]add an instruction after the mention, e.g.[/] "
+                         f"[b]@{mentions[0]} add input validation[/]")
+            else:
+                self.ask_architect(value)
 
     # ---- workers (threads) ----
     @work(thread=True)
@@ -129,7 +159,7 @@ class SwarmApp(App):
         self.phase = "chat"
         inp = self.query_one("#prompt", Input)
         inp.disabled = False
-        inp.placeholder = "chat with the Architect…   (@domain coming soon)"
+        inp.placeholder = "chat with the Architect, or @domain to run a change…"
         inp.focus()
 
     def _reset_to_url(self) -> None:
@@ -169,6 +199,80 @@ class SwarmApp(App):
         self.chat_history.append(f"User: {message}")
         self.chat_history.append(f"Architect: {reply}")
         self.call_from_thread(self.show_reply, reply)
+
+    # ---- Domain Lead runs (sandbox path; triggered by @domain) ----
+    def _domain(self, name: str):
+        return next((d for d in self.domains if d.name == name), None)
+
+    def _set_state(self, name: str, state: str) -> None:
+        self.roster_state[name] = state
+        self.render_roster()
+
+    def _show_report(self, report) -> None:
+        mark = "[green]🟢 tests pass[/]" if report.tests_passed else "[red]🔴 tests not passing[/]"
+        self.say(f"[b]{report.domain}[/] ▸ {mark}")
+        if report.summary:
+            self.convo.write(Markdown(report.summary))
+        for cc in report.contract_changes:
+            self.say(f"   [magenta]contract:[/] {cc.target_module}.{cc.target_symbol} → "
+                     f"[dim]{cc.proposed_signature}[/]")
+
+    def _end_work(self) -> None:
+        inp = self.query_one("#prompt", Input)
+        inp.disabled = False
+        inp.placeholder = "chat with the Architect, or @domain to run a change…"
+        inp.focus()
+        self.phase = "chat"
+
+    def _ensure_sandbox(self) -> None:
+        if self.env_id:
+            return
+        if self.backend is None:
+            self.backend = ManagedAgentBackend()
+        self.orch = Orchestrator(self.architect, self.backend,
+                                 repo_url=self.repo_url, subdir=self.subdir)
+        self.call_from_thread(
+            self.say, "[dim]🛠  provisioning sandbox — cloning + installing the repo "
+                      "(first run, a few minutes)…[/]")
+        env_id, baseline = self.orch.bootstrap()
+        self.env_id = env_id
+        self.call_from_thread(self.say, f"[green]✓ sandbox ready[/]  [dim]{baseline[:160]}[/]")
+
+    @work(thread=True)
+    def run_leads(self, domain_names: list[str], instruction: str) -> None:
+        try:
+            self._ensure_sandbox()
+            seen: set = set()
+            queue = [DomainDirective(domain=n, instruction=instruction, kind="primary")
+                     for n in domain_names]
+            budget = len(queue) + MAX_PROPAGATION_DIRECTIVES
+            while queue and budget > 0:
+                budget -= 1
+                directive = queue.pop(0)
+                domain = self._domain(directive.domain)
+                if domain is None:
+                    continue
+                self.call_from_thread(self._set_state, domain.name, "mutating")
+                self.call_from_thread(
+                    self.say,
+                    f"[yellow]🟡 {domain.name}[/] ▸ working in sandbox… [dim]({directive.kind})[/]")
+                report, _ = DomainLead(
+                    self.backend, domain, self.orch.repo_dir, self.orch.package_dir
+                ).execute(directive, self.env_id)
+                self.call_from_thread(
+                    self._set_state, domain.name,
+                    "passed" if report.tests_passed else "failed")
+                self.call_from_thread(self._show_report, report)
+                props = self.architect.resolve_propagations(
+                    self.topology, self.domains, report, seen)
+                for p in props:
+                    self.call_from_thread(
+                        self.say, f"[dim]🏛  Architect → propagating change to {p.domain}[/]")
+                queue.extend(props)
+        except Exception as exc:
+            self.call_from_thread(self.say, f"[red]error:[/] {exc}")
+        finally:
+            self.call_from_thread(self._end_work)
 
 
 def main() -> None:
