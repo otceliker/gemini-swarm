@@ -1,0 +1,14 @@
+[project]
+name = "gemini-swarm"
+version = "0.0.1"
+description = "Graph-based multi-agent swarm codebase evaluator on Antigravity Managed Agents"
+requires-python = ">=3.11"
+dependencies = [
+    "google-genai>=2.6.0",
+    "rich>=13.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
