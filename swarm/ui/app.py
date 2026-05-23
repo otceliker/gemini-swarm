@@ -168,6 +168,7 @@ class SwarmApp(App):
         self.say(f"[green]✓[/] Architect split the codebase into [b]{len(seg.domains)}[/] domains:")
         for d in seg.domains:
             self.say(f"  [b cyan]{d.name}[/] — [dim]{d.rationale}[/]")
+            self.say(f"     [dim]{', '.join(d.module_names)}[/]")
         if seg.unassigned:
             self.say(f"  [yellow]unassigned → common:[/] {', '.join(seg.unassigned)}")
         if seg.domains:
