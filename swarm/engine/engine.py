@@ -30,6 +30,7 @@ class Engine:
     deliberation: Deliberation
     bus: EventBus | None = None
     max_workers: int = 8
+    max_repairs: int = 1           # on a failed validation, re-mutate with the issues fed back
 
     def _emit(self, kind: str, **payload) -> None:
         if self.bus is not None:
@@ -59,6 +60,18 @@ class Engine:
                        ok=result.ok, summary=result.summary)
             report = self.modality.validate(seg, plan)
             self._emit(E.VALIDATION, segment=seg.id, ok=report.ok, issues=report.issues)
+
+            # Self-heal: re-mutate with the validation issues fed back, then re-validate.
+            attempt = 0
+            while not report.ok and attempt < self.max_repairs:
+                attempt += 1
+                self._emit(E.MUTATION, segment=seg.id, state="start", repair=attempt)
+                result = self.modality.mutate(seg, plan, feedback="; ".join(report.issues))
+                self._emit(E.MUTATION, segment=seg.id, state="done", ok=result.ok,
+                           summary=f"repair {attempt}: {result.summary}", repair=attempt)
+                report = self.modality.validate(seg, plan)
+                self._emit(E.VALIDATION, segment=seg.id, ok=report.ok, issues=report.issues)
+
             return seg.id, result, report
 
         if self.max_workers > 1 and len(segments) > 1:

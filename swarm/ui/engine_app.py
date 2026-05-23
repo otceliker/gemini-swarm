@@ -53,6 +53,7 @@ class EngineApp(App):
         self.source = ""
         self.segments: list[str] = []
         self.state: dict[str, str] = {}
+        self._failed: set[str] = set()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -104,15 +105,26 @@ class EngineApp(App):
         elif k == E.PLAN:
             self.channel.write(f"[b green]✓ plan ready[/] [dim]{len(p['directives'])} directives[/]")
         elif k == E.MUTATION:
+            seg = p["segment"]
             if p.get("state") == "start":
-                self.state[p["segment"]] = "mutating"
+                self.state[seg] = "mutating"
+                if p.get("repair"):
+                    self.channel.write(f"[yellow]↻ repairing {seg} (attempt {p['repair']})[/]")
             else:
-                self.state[p["segment"]] = "passed" if p.get("ok") else "failed"
-                self.channel.write(f"[yellow]✎ {p['segment']}[/] [dim]{p.get('summary', '')}[/]")
+                self.channel.write(f"[yellow]✎ {seg}[/] [dim]{p.get('summary', '')}[/]")
             self._render_roster()
         elif k == E.VALIDATION:
-            if not p.get("ok"):
-                self.channel.write(f"[red]✗ {p['segment']} validation: {p.get('issues')}[/]")
+            seg = p["segment"]
+            if p.get("ok"):
+                self.state[seg] = "passed"
+                if seg in self._failed:
+                    self._failed.discard(seg)
+                    self.channel.write(f"[green]✓ {seg} fixed[/]")
+            else:
+                self.state[seg] = "failed"
+                self._failed.add(seg)
+                self.channel.write(f"[red]✗ {seg}: {', '.join(p.get('issues') or [])}[/]")
+            self._render_roster()
 
     # ---- input ----
     def on_input_submitted(self, event: Input.Submitted) -> None:

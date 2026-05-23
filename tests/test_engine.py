@@ -28,12 +28,34 @@ class StubModality:
         return [Segment(id="a", kind="stub", summary="A"),
                 Segment(id="b", kind="stub", summary="B")]
 
-    def mutate(self, segment, plan):
+    def mutate(self, segment, plan, feedback=""):
         return MutationResult(segment_id=segment.id, ok=True,
                               summary=f"{segment.id}: {plan.directives.get(segment.id)}")
 
     def validate(self, segment, plan):
         return ValidationReport(segment_id=segment.id, ok=True)
+
+
+class FlakyModality:
+    """Fails validation on the first pass, passes once a repair has re-mutated."""
+
+    name = "flaky"
+
+    def __init__(self):
+        self.calls: dict[str, int] = {}
+
+    def ingest(self, source):
+        return [Segment(id="a", kind="flaky", summary="A")]
+
+    def mutate(self, segment, plan, feedback=""):
+        self.calls[segment.id] = self.calls.get(segment.id, 0) + 1
+        return MutationResult(segment_id=segment.id, ok=True,
+                              summary=f"attempt {self.calls[segment.id]} fb={bool(feedback)}")
+
+    def validate(self, segment, plan):
+        ok = self.calls.get(segment.id, 0) >= 2
+        return ValidationReport(segment_id=segment.id, ok=ok,
+                                issues=[] if ok else ["inconsistent term"])
 
 
 def test_engine_runs_three_phases_and_threads_plan_into_mutate():
@@ -51,3 +73,12 @@ def test_engine_runs_three_phases_and_threads_plan_into_mutate():
     # phases fired in order, deliberation events surfaced on the shared bus
     phases = [e.payload.get("phase") for e in bus.history if e.kind == PHASE]
     assert phases == ["ingest", "deliberate", "mutate", "done"]
+
+
+def test_engine_repairs_failed_validation():
+    fake = DelibFake()
+    delib = Deliberation(worker_reasoner=fake, arbiter=Arbiter(fake), rounds=2)
+    mod = FlakyModality()
+    result = Engine(modality=mod, deliberation=delib, max_workers=1, max_repairs=1).run("s", "g")
+    assert mod.calls["a"] == 2          # initial mutate + one repair
+    assert result.validations["a"].ok   # fixed after the repair fed the issues back

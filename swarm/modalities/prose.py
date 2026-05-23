@@ -33,7 +33,7 @@ Canon (terminology, names, and facts to use consistently):
 
 Invariants:
 {invariants}
-
+{corrections}
 Passage to transform (preserve its content and ORDER exactly — restyle only):
 \"\"\"
 {text}
@@ -174,11 +174,13 @@ class ProseModality:
                 seg.relations.append(segments[i + 1].id)
         return segments
 
-    def mutate(self, segment: Segment, plan: ExecutionPlan) -> MutationResult:
+    def mutate(self, segment: Segment, plan: ExecutionPlan, feedback: str = "") -> MutationResult:
+        corrections = (f"\nFix these issues flagged in a prior validation:\n{feedback}\n"
+                       if feedback else "")
         prompt = REWRITE_PROMPT.format(
             directive=plan.directives.get(segment.id, "") or "(none)",
             bible=plan.bible or "(none)", invariants=_invariants(plan),
-            text=segment.meta.get("text", ""),
+            corrections=corrections, text=segment.meta.get("text", ""),
         )
         try:
             new_text = self.reasoner.complete(REWRITE_SYSTEM, prompt).strip()

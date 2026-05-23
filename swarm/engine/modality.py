@@ -35,8 +35,12 @@ class Modality(Protocol):
         """Turn a source (repo URL, text URL/path) into coupled segments."""
         ...
 
-    def mutate(self, segment: Segment, plan: ExecutionPlan) -> MutationResult:
-        """Apply this segment's directive (parallel-safe: segments are disjoint)."""
+    def mutate(self, segment: Segment, plan: ExecutionPlan, feedback: str = "") -> MutationResult:
+        """Apply this segment's directive (parallel-safe: segments are disjoint).
+
+        `feedback` carries validation issues on a repair retry — apply the change
+        again, fixing the listed problems.
+        """
         ...
 
     def validate(self, segment: Segment, plan: ExecutionPlan) -> ValidationReport:
