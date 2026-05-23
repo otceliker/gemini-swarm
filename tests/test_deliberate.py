@@ -27,13 +27,13 @@ class RoleFake:
 
     def complete(self, system: str, prompt: str) -> str:
         s = system.lower()
+        if "worker agent" in s:               # check worker first (its prompt mentions "Arbiter")
+            return self.worker
         if "execution plan" in s:
             return self.plan
-        if "arbiter" in s:
-            out = self.closes[min(self.close_i, len(self.closes) - 1)]
-            self.close_i += 1
-            return out
-        return self.worker
+        out = self.closes[min(self.close_i, len(self.closes) - 1)]
+        self.close_i += 1
+        return out
 
 
 def _delib(worker, closes, plan, rounds=10, bus=None):

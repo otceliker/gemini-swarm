@@ -14,11 +14,11 @@ class DelibFake:
 
     def complete(self, system: str, prompt: str) -> str:
         s = system.lower()
+        if "worker agent" in s:               # check worker first (its prompt mentions "Arbiter")
+            return '{"message":"ok","stable":true}'
         if "execution plan" in s:
             return '{"directives":{"a":"do a","b":"do b"},"invariants":["keep voice"]}'
-        if "arbiter" in s:
-            return '{"decisions":["d1"],"converged":true}'
-        return '{"message":"ok","stable":true}'
+        return '{"decisions":["d1"],"converged":true}'
 
 
 class StubModality:
